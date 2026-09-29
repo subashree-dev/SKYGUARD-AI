@@ -1,5 +1,4 @@
 import pandas as pd
-import joblib
 from pathlib import Path
 
 from sklearn.ensemble import IsolationForest
@@ -11,108 +10,41 @@ from sklearn.metrics import (
     recall_score,
     f1_score
 )
-from sklearn.model_selection import train_test_split
 
 
 # ============================================================
 # FILE PATHS
 # ============================================================
 
-input_file = Path("data/synthetic/synthetic_sensor_data.csv")
-model_file = Path("models/isolation_forest.pkl")
+clean_file = Path("data/clean/clean_baseline.csv")
+synthetic_file = Path("data/synthetic/synthetic_sensor_data.csv")
 
 
 # ============================================================
 # LOAD DATA
 # ============================================================
 
-df = pd.read_csv(input_file)
-
-df["timestamp"] = pd.to_datetime(df["timestamp"])
-
-# Sort readings chronologically
-df = df.sort_values("timestamp").reset_index(drop=True)
+clean_df = pd.read_csv(clean_file)
+test_df = pd.read_csv(synthetic_file)
 
 
 # ============================================================
-# TEMPORAL FEATURES
-# ============================================================
-
-df["temperature_change"] = df["temperature_c"].diff().fillna(0)
-
-df["humidity_change"] = df["humidity_pct"].diff().fillna(0)
-
-df["pressure_change"] = df["pressure_hpa"].diff().fillna(0)
-
-
-# Rolling averages
-df["temperature_rolling"] = (
-    df["temperature_c"]
-    .rolling(window=3)
-    .mean()
-    .bfill()
-)
-
-df["humidity_rolling"] = (
-    df["humidity_pct"]
-    .rolling(window=3)
-    .mean()
-    .bfill()
-)
-
-df["pressure_rolling"] = (
-    df["pressure_hpa"]
-    .rolling(window=3)
-    .mean()
-    .bfill()
-)
-
-
-# ============================================================
-# FEATURES USED BY AI
+# FEATURES
 # ============================================================
 
 features = [
     "temperature_c",
     "humidity_pct",
-    "pressure_hpa",
-    "temperature_change",
-    "humidity_change",
-    "pressure_change",
-    "temperature_rolling",
-    "humidity_rolling",
-    "pressure_rolling"
+    "pressure_hpa"
 ]
 
-X = df[features]
-y = df["is_anomaly"]
+X_train = clean_df[features]
+X_test = test_df[features]
+y_test = test_df["is_anomaly"]
 
 
 # ============================================================
-# TRAIN / TEST SPLIT
-# ============================================================
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.30,
-    random_state=42,
-    stratify=y
-)
-
-
-print("\n============================================================")
-print("SKYGUARD AI - TEMPORAL ANOMALY MODEL")
-print("============================================================")
-
-print(f"Total samples : {len(df)}")
-print(f"Training data : {len(X_train)}")
-print(f"Testing data  : {len(X_test)}")
-print(f"AI features   : {len(features)}")
-
-
-# ============================================================
-# TRAIN ISOLATION FOREST
+# TRAIN MODEL ONLY ON CLEAN DATA
 # ============================================================
 
 model = IsolationForest(
@@ -125,7 +57,7 @@ model.fit(X_train)
 
 
 # ============================================================
-# TEST ON UNSEEN DATA
+# PREDICT SYNTHETIC TEST DATA
 # ============================================================
 
 predictions = model.predict(X_test)
@@ -140,7 +72,10 @@ ai_anomaly = [
 # EVALUATION
 # ============================================================
 
-accuracy = accuracy_score(y_test, ai_anomaly)
+accuracy = accuracy_score(
+    y_test,
+    ai_anomaly
+)
 
 precision = precision_score(
     y_test,
@@ -160,6 +95,18 @@ f1 = f1_score(
     zero_division=0
 )
 
+
+# ============================================================
+# DISPLAY RESULTS
+# ============================================================
+
+print("\n============================================================")
+print("SKYGUARD AI - CLEAN TRAINING / FAULT TEST EVALUATION")
+print("============================================================")
+
+print(f"Training samples : {len(X_train)}")
+print(f"Testing samples  : {len(X_test)}")
+print(f"AI features      : {len(features)}")
 
 print("\n------------------------------------------------------------")
 print("EVALUATION RESULTS")
@@ -201,11 +148,33 @@ print(
 
 
 # ============================================================
-# SAVE MODEL
+# ANOMALY TYPE ANALYSIS
 # ============================================================
 
-joblib.dump(model, model_file)
+test_df["ai_anomaly"] = ai_anomaly
 
+print("\n------------------------------------------------------------")
+print("DETECTION BY ANOMALY TYPE")
 print("------------------------------------------------------------")
-print(f"Model saved to: {model_file}")
+
+anomaly_types = test_df[test_df["is_anomaly"] == 1]
+
+for anomaly_type, group in anomaly_types.groupby("anomaly_type"):
+
+    detected = group["ai_anomaly"].sum()
+    total = len(group)
+
+    detection_rate = detected / total * 100
+
+    print(
+        f"{anomaly_type:20s} "
+        f"{detected:2d}/{total:2d} detected "
+        f"({detection_rate:.1f}%)"
+    )
+
+
+print("\n============================================================")
+print("Evaluation complete.")
+print("Training used only clean NOAA baseline data.")
+print("Testing used NOAA data with synthetic sensor faults.")
 print("============================================================")
